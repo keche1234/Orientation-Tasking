@@ -1,6 +1,6 @@
 /*******************************************************************************
- * Original Script: Ellia Yang (SCS '25)
- * Contributors:  Kenechukwu Echezona (SCS '26)
+ * Original Script: Ellia Yang (SCS '25 / Orientation 2023)
+ * Contributors:  Kenechukwu Echezona (SCS '26 / Orientation 2025)
  ******************************************************************************/
 // When you open the spreadsheet, "onOpen" modifies the UI to have a button called Orientation
 // Instructions on how to run in the comment for the onOpen
@@ -10,10 +10,10 @@ var calendarId = 'cmuorientationtasking@andrew.cmu.edu';
 /*
  * These values can be found in the "Roster" tab.
  * Keep each position contiguous between [roleMin, roleMax)
- * When using these for array indices, subtract 1
- * THESE ARE OFFSET 1 (aka the "true" values)
+ * THESE ARE 1-INDEXED (aka the front-end values)
+ * When using these for array indices in code, subtract 1
  */
-var hocMin = 4;
+var hocMin = 4; // change the <role>Min/<role>Max values ONLY
 var hocMax = 12;
 var olMin = 12;
 var olMax = 37;
@@ -47,7 +47,7 @@ var firstTaskRow = 0;
 
 /*
  * Refer to the columns in the roster and assignment sheets
- * This is OFFSET OF 0
+ * This is 0-INDEXED
  */
 var rosterEmailCol = 1;
 
@@ -69,64 +69,42 @@ var assignmentStartNum = 2; // offset of 1
  */
 var rosterPosLetter = "F";
 
-const ocArray = createNumberRangeArray(ocMin, ocMax);
-const olArray = createNumberRangeArray(olMin, olMax);
-const hocArray = createNumberRangeArray(hocMin, hocMax);
-
-var ocAvail = [];
-var olAvail = [];
-
 var scheduleBuffer = 15 * 60; // staff should have a break of at least this time (in seconds) in between events
-
-function createNumberRangeArray(start, end) {
-  const result = [];
-  
-  for (let i = start; i < end; i++) {
-    result.push(i);
-  }
-  
-  return result;
-}
-
-function arrayConcat(array1, array2) {
-  return array1.concat(array2);
-}
 
 /*********************************************************
  * Runs... well, when the spreadsheet opens
  * Adds the buttons to the spreadsheet UI
  * 
+ * Quic Guide
  * 1) Run the "GCal Creation/Setup" functions first.
  * 2) Add the manual tasks to the spreadsheet that will
  *    have random assignments written to, so the schedule
  *    generator will take into account those conflicts.
  * 3) Generate Random Schedules.
- * 4) Use the "Invite" functions.
+ * 4) Use the "Invite" functions (you can do the big invites earlier)
  ********************************************************/
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Orientation')
       // GCal Creation/setup
       .addItem('Create Selected Training Tasks', 'createTrainingEvents')
-      .addItem('Invite all to Selected Training Events', 'sendTrainingInvites')
-      .addSeparator() // TODO: Create based on selection
-      .addItem('Create Selected Big Events', 'createBigEvents')
-      .addItem('Create Selected Manual Events', 'createManualEvents')
-      .addItem('Create Selected Random Events', 'createRandomEvents')
+      .addItem('Invite All to Selected Training Events', 'sendTrainingInvites')
+      .addSeparator() // Create based on selection
+      .addItem('Create Selected Big GCal Events', 'createBigEvents')
+      .addItem('Create Selected Manual GCal Events', 'createManualEvents')
+      .addItem('Create Selected Random GCal Events', 'createRandomEvents')
       .addSeparator()
       // Random events to add to specific
-      .addItem('Assign Random Events', 'assignRandomSchedules')
+      .addItem('Assign Random Tasks', 'assignRandomSchedules')
       .addSeparator()
-      // invitation process
-      .addItem('Invite All Staff to Selected Big Events', 'sendBigInvites')
-      .addItem('Invite Selected OCs to Specific Events (Manual + Random)', 'sendSelectedOCsInvites')
-      .addItem('Invite Selected OLs to Specific Events (Manual + Random)', 'sendSelectedOLsInvites')
-      .addItem('Invite Selected HOCs to Specific Events (Manual + Random)', 'sendSelectedHOCsInvites')
+      // Invitation process
+      .addItem('Invite All Staff to Selected Big GCal Events', 'sendBigInvites')
+      .addItem('Invite Selected OCs to Specific GCal Events (Manual + Random)', 'sendSelectedOCsInvites')
+      .addItem('Invite Selected OLs to Specific GCal Events (Manual + Random)', 'sendSelectedOLsInvites')
+      .addItem('Invite Selected HOCs to Specific GCal Events (Manual + Random)', 'sendSelectedHOCsInvites')
       //.addSeparator()
-      //TODO: addItem('Delete Selected Events (GCcal)', 'delete_events()')
+      //TODO: addItem('(DANGER) Delete Selected Events (GCcal)', 'delete_events()')
       .addToUi();
 }
-
-//Use this to set up the calendar events, I originally imported everything at once, but then I just started manually putting chunks of events into Sheet15 so that I could do a smaller section at a time in case I messed up anywhere
 
 /*****************************************************************************
  *****************************************************************************
@@ -147,6 +125,7 @@ function createTrainingEvents() {
 function createBigEvents() {
   createTasksFromSheet_('BigTasks');
 }
+
 function createRandomEvents() {
   createTasksFromSheet_('RandomTasks');
 }
@@ -198,7 +177,7 @@ function setUpCalendarTasks_(values, fullRange, selectedRange) {
         .setGuestsCanSeeGuests(true);
     session[eventIDCol] = event.getId();
   }
-  fullRange.setValues(values); // TODO: can this line be removed???
+  fullRange.setValues(values); // TODO: figure out if this line can be removed!
 }
 
 //Helper function to make stuff formatted better for the calendar import
@@ -220,18 +199,19 @@ function addAllGuests(eventId, values, cal){
 /*****************************************************************************
  *****************************************************************************
  * B: RANDOMIZING SCHEDULES
- * This includes helper functions for managing schedule times
+ * This includes helper functions for managing schedule times,
  * as well as the functions that use these helpers. The aim is to create
  * random schedules, then assign to the staff. The script will avoid conflicts
  * amongst random events, but some OCs may be tasked to specific events, so
  * Tasking HOCs can manually fix those afterwards.
+ * I recommend setting manual events first.
  *****************************************************************************
  *****************************************************************************/
 
 /***********************************************************************
  * Helper function for finding the latest event in `scheduleTimes`
  * that begins strictly before `start`. Returns the index of that
- * event, or -1 if `start` is the earliest event.
+ * event, or -1 if `start` is earlier than anything in the schedule.
  * 
  * `scheduleTimes`: a list of integer pairs, where each pair (x, y)
  *                  represents the start and ending unix timestamps
@@ -241,8 +221,6 @@ function addAllGuests(eventId, values, cal){
  * Precondition: `scheduleTimes` is sorted by the start times in
  *               increasing order
  * Precondition: `scheduleTimes` contains no overlapping busy periods.
- * Precondition: `start` < `end`
- *          
  ************************************************************************/
  function findLastPrecursorEvent_(scheduleTimes, start) {
   // 0) Empty schedule has no precursors
@@ -312,10 +290,10 @@ function isScheduleFree_(scheduleTimes, start, end, buffer = 0) {
   let floorIndex = findLastPrecursorEvent_(scheduleTimes, start);
 
   // 2) Determine if (start, end) begins at the start, end, or middle of the schedule
-  if (floorIndex <= -1) // attempt to be first event
-    return end + buffer < scheduleTimes[0][0];
-  else if (floorIndex >= scheduleTimes.length - 1) // attempt to be last event
-    return start - buffer > scheduleTimes[scheduleTimes.length - 1][1];
+  if (floorIndex <= -1) // `start` comes before the beginning of any event in the schedule
+    return end + buffer < scheduleTimes[0][0]; // must end at least `buffer` seconds before the first event
+  else if (floorIndex >= scheduleTimes.length - 1) // `start` comes after the beginning of any event in the schedule
+    return start - buffer > scheduleTimes[scheduleTimes.length - 1][1]; // must start at least `buffer` seconds after the last event
   return start - buffer > scheduleTimes[floorIndex][1] && end + buffer < scheduleTimes[floorIndex + 1][0];
 }
 
@@ -339,14 +317,13 @@ function isScheduleFree_(scheduleTimes, start, end, buffer = 0) {
   if (scheduleTimes.length == 0)
     return [[start, end]];
 
-  // 1) Find the lastest event that starts before `start`.
-  //    If an event buffer lies 
+  // 1) Find the lastest event that starts before `start`
   let floorIndex = findLastPrecursorEvent_(scheduleTimes, start);
 
   // 2) Prepend or append if earliest or latest...
   if (floorIndex == -1)
     return [[start, end]].concat(scheduleTimes);
-  else if (floorIndex == scheduleTimes.length -1)
+  else if (floorIndex == scheduleTimes.length - 1)
     return scheduleTimes.concat([[start, end]]);
   else
   {
@@ -370,13 +347,12 @@ function isScheduleFree_(scheduleTimes, start, end, buffer = 0) {
  * `eventValues`: 2D array of the values from a spreadsheet (assumes first row is a header)
  * `staffCount`: the number of staff of a specific type (OC, OL, or HOC)
  * `staffColumn`: the column used to source the number of a staff type needed at an event
- * `startCol`: the column used to source the start time
- * `endCol`: the column used to source the end time
+ * `scheduleTimes`: 2D array of time intervals (two-element lists) in unix seconds, with existing busy time intervals
  * Returns a tuple of (schedules, remainder, largest schedule size).
  * 
- * If a "specific" event needs x people, then it essentially needs to appear in x combinations
- * So we determine the average amount of events an OC would need to be tasked to, that'll dictate
- * the size of your combinations.
+ * If a "specific" event needs x people, then it needs to appear in x combinations
+ * So we determine the average amount of events an OC would need to be tasked to,
+ * and that'll dictate the expected size of your combinations. Each event has a slot per staff member.
  * 
  * We check for conflicts using a parallel list of that represents schedules as lists of
  * time intervals (themselves being arrays of two elements because js doesn't have tuples oh my days).
@@ -416,18 +392,17 @@ function createRandomSchedules_(eventValues, staffCount, staffColumn, scheduleTi
   let schedules = [];
   // let scheduleTimes = []; // list of int pairs (sorted by start) for determining conflicts
   let remainder = [];
-  let filledSchedules = new Set();
+  let filledSchedules = new Set(); // skip these
   for (let i = 0; i < staffCount; i++)
   {
     schedules[i] = [];
-    // scheduleTimes[i] = [];
   }
   let largestScheduleSize = 0;
 
   let currentSchedule = 0;
   while (allEventSlots.length > 0 && filledSchedules.size < staffCount)
   {
-    if (!filledSchedules.has(currentSchedule))
+    if (!filledSchedules.has(currentSchedule)) // this schedule has not been *marked* as filled yet
     {
       // a) Is the schedule full via quantity?
       if (schedules[currentSchedule].length >= eventsPerStaff + 1)
@@ -502,7 +477,8 @@ function createRandomSchedules_(eventValues, staffCount, staffColumn, scheduleTi
   }
 
   // 4) Add remaining events to `remainder` by flattening allEventIDs
-  remainder = allEventSlots.length > 0 ? allEventSlots.reduce(arrayConcat) : [];
+  // TODO: Convert to for loop to (slightly) improve performance
+  remainder = allEventSlots.length > 0 ? allEventSlots.reduce((a, b) => a.concat(b)) : [];
 
   // 5) Return schedules and remaining events to assign
   return [schedules, remainder, largestScheduleSize];
@@ -544,7 +520,7 @@ function padScheduleRow_(schedule, size, padding = ""){
 function TEST_writeToSheet(){
   let ss = SpreadsheetApp.getActive();
   let assignmentSheet = ss.getSheetByName('Sandbox(Test)');
-  assignmentSheet.getRange("A1:D4").setValues([["\"hey", "baby", "how's", "it"],
+  assignmentSheet.getRange("C3:F6").setValues([["\"hey", "baby", "how's", "it"],
                                                ["going?", "", "This", "beat"],
                                                ["is", "non", "-", "stop!\""],
                                                ["(Play", "Rhythm", "Heaven,", "please)"]]);
@@ -575,6 +551,7 @@ function assignSchedulesForPosition_(position, posSlotCol, taskValues, assignmen
   let rosterPositions = rosterSheet.getRange(rosterPosLetter + hocMin + ":" +
                                              rosterPosLetter + (ocMax+1)).getValues(); // 2D array of the values themselves
   let staffCount = rosterPositions.filter(function(value) { return value == position} ).length;
+
   // (2) Create scheduleTimes based on manual tasks
   ///    as an argument by reading from assignmentSheet 
   let scheduleTimes = [];
@@ -650,7 +627,6 @@ function assignRandomSchedules()
   // 0) Setup: Reading from Roster and SpecificTasks, Writing to SpecificAssignments
   let ss = SpreadsheetApp.getActive();
   let taskSheet = ss.getSheetByName('RandomTasks');
-  // let taskSheet = ss.getSheetByName('RandomTasks');
   let taskValues = taskSheet.getDataRange().getValues(); // 2D array of the values themselves
 
   // 1) Create OC schedules, write to spreadsheet
@@ -660,6 +636,8 @@ function assignRandomSchedules()
   assignSchedulesForPosition_("OL", olsNeededCol, taskValues, "SpecificAssignments(OL)");
 
   // 3) Create HOC schedules, write to spreadsheet
+  //    (probably unnecessary tbh since there's ~eight of them, and will either be
+  //     at their taskings' events or can just decide amongst each other who does what)
   assignSchedulesForPosition_("HOC", hocsNeededCol, taskValues, "SpecificAssignments(HOC)");
 }
 
@@ -699,7 +677,8 @@ function sendMassInvites_(eventSheetName) {
 
     // [start, end)
     for (let event = Math.max(1, startRow); event < Math.min(bigTaskValues.length, endRow); event++) {
-      // invite each role (we don't necessarily assume each role is contiguous on the roster, though why wouldn't they be lol)
+      // invite each role (we don't necessarily assume each role is contiguous on the roster here,
+      //                   although there's no reason they wouldn't be if you follow the formatting guidelines...)
       for (let staff = hocMin - 1; staff < hocMax - 1; staff++) {
         let email = rosterValues[staff][rosterEmailCol];
         if (indexOfGuestEmailList_(cal.getEventById(bigTaskValues[event][eventIDCol]).getGuestList(), email) < 0)
@@ -725,7 +704,7 @@ function sendMassInvites_(eventSheetName) {
 
 /*****************************************************************************
  *****************************************************************************
- * D: INVITING TO RANDOM + SPECIFIC
+ * D: INVITING TO SPECIFIC (RANDOM + MANUAL)
  * Random schedules are created with the eventID in the "title", in case
  * any manual changes have to be made. Rather than dedicating a whole nother
  * sheet to the IDs, we can just parse the event ID from the title and invite.
@@ -869,15 +848,15 @@ function eventIDParseRow_(titles) {
 
 /*****************************************************************************
  *****************************************************************************
- * F: MISCELLANEOUS HELPERS/UNUSED FUNCTIONS
+ * F: MISCELLANEOUS HELPERS
  *****************************************************************************
  *****************************************************************************/
-//Allows you to delete all the events for a specific range (we used this to erase things that we messed up on )
+//Allows you to delete all the events for a specific range (we used this to erase things that we messed up on)
 function delete_events()
 {
-  // EDIT THESE VALUES BEFORE UNCOMMENTING. Month is 0-11.
-  // var fromDate = new Date(2025,7,10);
-  // var toDate = new Date(2025,7,31);
+  // EDIT THESE VALUES BEFORE UNCOMMENTING
+  // var fromDate = new Date(2022,7,10);
+  // var toDate = new Date(2022,7,31);
   var calendar = CalendarApp.getCalendarById(calendarId);
 
   var events = calendar.getEvents(fromDate, toDate);
@@ -894,72 +873,69 @@ function indexOfGuestEmailList_(guestList, email) {
   return -1;
 }
 
+
+/*****************************************************************************
+ *****************************************************************************
+ * G: OTHER FUNCTIONS FROM ELLIA'S SCRIPT
+ *****************************************************************************
+ *****************************************************************************/
 //My original function for pulling staff from spreadsheet
 //Didn't end up using this exact function but leaving it here in case there's anything other people want to use
-function getStaff_(ocNum, olNum, hocNum){
-  result = '';
-  first = true;
-  for (let i = 0; i < ocNum; i++){
-    if (first){
-      result += ocStart;
-      first = false;
-    }
-    else{
-      result += ',' + ocStart;
-    }
-    ocStart = (ocStart + 1)%125;
+// function getStaff_(ocNum, olNum, hocNum){
+//   result = '';
+//   first = true;
+//   for (let i = 0; i < ocNum; i++){
+//     if (first){
+//       result += ocStart;
+//       first = false;
+//     }
+//     else{
+//       result += ',' + ocStart;
+//     }
+//     ocStart = (ocStart + 1)%125;
     
-  }
-  for (let i = 0; i < olNum; i++){
-    if (first){
-      result += olStart;
-      first = false;
-    }
-    else{
-      result += ',' + olStart;
-    }
-    olStart = (olStart + 1)%28;
+//   }
+//   for (let i = 0; i < olNum; i++){
+//     if (first){
+//       result += olStart;
+//       first = false;
+//     }
+//     else{
+//       result += ',' + olStart;
+//     }
+//     olStart = (olStart + 1)%28;
     
-  }
-  for (let i = 0; i < hocNum; i++){
-    if (first){
-      result += hocStart;
-      first = false;
-    }
-    else{
-      result += ',' + hocStart;
-    }
-    hocStart = (hocStart + 1)%7;
+//   }
+//   for (let i = 0; i < hocNum; i++){
+//     if (first){
+//       result += hocStart;
+//       first = false;
+//     }
+//     else{
+//       result += ',' + hocStart;
+//     }
+//     hocStart = (hocStart + 1)%7;
     
-  }
-  return result;
-}
+//   }
+//   return result;
+// }
 
-//This was for finding their numbers based on their names I think, but neither of ended up using this in my final implementation
-function findStaffNum_(names){
-  let ss = SpreadsheetApp.getActive();
-  let sheet = ss.getSheetByName('Roster');
-  let range = sheet.getDataRange();
-  namesList = names.split(',');
-  result = ""
-  for (let name of namesList){
-    result += "," + MATCH(name, range, 0).toString();
-  }
-  return result;
-}
-
-//For generating random staff numbers, also was in original implementation
-function getRandomInt_(min, max) {
-  min = Math.ceil(min);
-  max = Math.floor(max);
-  return Math.floor(Math.random() * (max - min) + min); 
-}
-
-// unused function for sending all invites
-// function sendAllSpecificInvites_() {
+// //This was for finding their numbers based on their names I think, but also didn't end up using this in my final implementation
+// function findStaffNum_(names){
 //   let ss = SpreadsheetApp.getActive();
+//   let sheet = ss.getSheetByName('Roster');
+//   let range = sheet.getDataRange();
+//   namesList = names.split(',');
+//   result = ""
+//   for (let name of namesList){
+//     result += "," + MATCH(name, range, 0).toString();
+//   }
+//   return result;
+// }
 
-//   sendSpecificInvites_(ocMax - ocMin, ss.getSheetByName('SpecificAssignment(OC)'), null);
-//   sendSpecificInvites_(olMax - olMin, ss.getSheetByName('SpecificAssignment(OL)'), null);
-//   sendSpecificInvites_(hocMax - hocMin, ss.getSheetByName('SpecificAssignment(HOC)'), null);
+// //For generating random staff numbers, also was in original implementation
+// function getRandomInt_(min, max) {
+//   min = Math.ceil(min);
+//   max = Math.floor(max);
+//   return Math.floor(Math.random() * (max - min) + min); 
 // }
